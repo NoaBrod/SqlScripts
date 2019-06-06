@@ -1,0 +1,329 @@
+USE [master]
+GO
+
+CREATE PROCEDURE [dbo].[sp_Auto_Restore]	
+		  @PerformRecovery				BIT				= 1 -- Only when set to 1 will the database be fully recovered
+		, @Debug						BIT				= 0 -- When 1 will not execute any restores
+		, @OriginalDatabaseName			SYSNAME			= 'MyDB' -- database to restore
+		, @RestoredDatabaseName			SYSNAME			= 'MyDB_Rep'
+
+-- Set current backups location
+-- Make sure SQL Service has permissions
+		, @FullBackupFolder				VARCHAR(4000)   = 'G:\SQL-BACK\ServerNameFolder\MyDB\Full'
+-- Set New files location		
+		, @DataNewLocation				VARCHAR(4000)   = 'E:\SQL-DATA\MyDB_Rep'
+		, @LogNewLocation				VARCHAR(4000)   = 'E:\SQL-DATA\MyDB_Rep'
+AS
+BEGIN
+
+DECLARE
+	  @CurrentPointInDB				DATETIME2
+	, @LastFullBackupName			VARCHAR(4000)
+	, @LastFullBackupDate			DATETIME2
+	, @LastFullBackupLSN			NUMERIC(25,0)
+	, @LastBackupDate    			DATETIME2
+	, @FilesRestore					NVARCHAR(4000)  = ''
+	, @FolderExists					INT
+	, @CmdshellValue				INT
+	, @AdvancedValue				INT
+
+SET NOCOUNT ON;
+
+DECLARE @Output AS TABLE (Msg NVARCHAR(MAX));
+DECLARE @CMD NVARCHAR(4000)
+
+---------------------------------------------------------------------------
+------------------------ Prerequisites
+---------------------------------------------------------------------------
+IF OBJECT_ID ('tempdb..#Restore') IS NOT NULL
+DROP TABLE #Restore
+
+CREATE TABLE #Restore
+	(ID				INT IDENTITY (1,1),
+	 FileType		SYSNAME,
+	 FilePath		NVARCHAR(255),
+	 FileDate		DATETIME2,
+	 DatabaseName	SYSNAME
+	);
+
+RAISERROR ('Checking folders exist',0,1) WITH NOWAIT;
+
+	IF OBJECT_ID('tempdb..#DirectoryChecks') IS NOT NULL
+	DROP TABLE #DirectoryChecks
+
+    CREATE TABLE #DirectoryChecks
+		(file_exists int,
+		file_is_a_directory int,
+		parent_directory_exists int)
+
+-- Check Data folder
+
+    INSERT INTO #DirectoryChecks
+    (file_exists, file_is_a_directory, parent_directory_exists)
+    EXEC master.dbo.xp_fileexist @DataNewLocation
+     
+    SELECT @FolderExists = file_is_a_directory
+    FROM #DirectoryChecks
+     
+    --script to create directory        
+    IF @FolderExists = 0 AND @Debug = 0
+     BEGIN
+		RAISERROR ('	Creating data folder',0,1) WITH NOWAIT;
+        EXECUTE master.dbo.xp_create_subdir @DataNewLocation
+     END
+	 ELSE IF  @FolderExists = 0 AND @Debug = 1
+		RAISERROR ('	Need to create data folder',0,1) WITH NOWAIT;
+	 ELSE 
+		RAISERROR ('	Data folder exist',0,1) WITH NOWAIT;  
+		
+	IF RIGHT(@DataNewLocation, 1) <> '\'
+		SET @DataNewLocation = @DataNewLocation + '\'     
+ 
+ -- Check Log folder
+
+	TRUNCATE TABLE #DirectoryChecks
+
+    INSERT INTO #DirectoryChecks
+    (file_exists, file_is_a_directory, parent_directory_exists)
+    EXEC master.dbo.xp_fileexist @LogNewLocation
+     
+    SELECT @FolderExists = file_is_a_directory
+    FROM #DirectoryChecks
+     
+    --script to create directory
+    IF @FolderExists = 0 AND @Debug = 0
+     BEGIN
+		RAISERROR ('	Creating log folder',0,1) WITH NOWAIT;
+        EXECUTE master.dbo.xp_create_subdir @LogNewLocation
+     END 
+	 ELSE IF @FolderExists = 0 AND @Debug = 1
+		RAISERROR ('	Need to create log folder',0,1) WITH NOWAIT;
+	 ELSE
+		RAISERROR ('	Log folder exist',0,1) WITH NOWAIT;   
+	
+	IF RIGHT(@LogNewLocation, 1) <> '\'
+		SET @LogNewLocation = @LogNewLocation + '\'  
+
+---------------------------------------------------------------------------
+------------------------ Get all full backup files
+---------------------------------------------------------------------------
+RAISERROR ('Getting full backup files',0,1) WITH NOWAIT;   
+
+-- Get the last full backup
+		IF OBJECT_ID('tempdb..#Full1') IS NOT NULL
+		DROP TABLE #Full1
+
+		CREATE TABLE #Full1 (
+			Id int identity(1,1),
+			SubDirectory nvarchar(255),
+			Depth smallint,
+			FileFlag bit,
+			ParentDirectoryID int
+		   )
+
+	   SET @CMD = 'EXEC master..xp_dirtree '''+@FullBackupFolder +''', 10, 1'
+	   INSERT INTO #Full1 (SubDirectory, Depth, FileFlag)
+	   EXECUTE (@CMD)
+	
+
+	   SELECT TOP 1
+			@LastFullBackupName = SubDirectory, 
+			@LastFullBackupDate = CONVERT (varchar(10) ,SUBSTRING(SubDirectory,CHARINDEX('full_',SubDirectory,0)+5,8))
+	   FROM #Full1
+	   ORDER BY SubDirectory DESC
+	  
+
+   INSERT INTO #Restore (FileType, FilePath, FileDate, DatabaseName)
+   SELECT 'Full', @LastFullBackupName, @LastFullBackupDate , @OriginalDatabaseName
+ 
+
+IF @LastFullBackupDate IS NOT NULL
+	BEGIN
+	DECLARE @DateString VARCHAR(20) = CAST(@LastFullBackupDate AS VARCHAR(20))
+	RAISERROR ('	Last full backup to restore: %s',0,1,@DateString) WITH NOWAIT;
+	END
+
+-- Get database files
+
+	IF OBJECT_ID('tempdb..#Files') IS NOT NULL
+		DROP TABLE #Files
+
+		CREATE TABLE #Files
+		(
+		LogicalName nvarchar(128) 
+		,PhysicalName nvarchar(260) 
+		,Type char(1) 
+		,FileGroupName nvarchar(128) 
+		,Size numeric(20,0) 
+		,MaxSize numeric(20,0),
+		Fileid	tinyint,
+		CreateLSN numeric(25,0),
+		DropLSN numeric(25, 0),
+		UniqueID uniqueidentifier,
+		ReadOnlyLSN numeric(25,0),
+		ReadWriteLSN numeric(25,0),
+		BackupSizeInBytes bigint,
+		SourceBlocSize int,
+		FileGroupId int,
+		LogGroupGUID uniqueidentifier,
+		DifferentialBaseLSN numeric(25,0),
+		DifferentialBaseGUID uniqueidentifier,
+		IsReadOnly bit,
+		IsPresent bit,
+		TDEThumbprint varbinary(32) 
+		)
+
+	IF RIGHT(@FullBackupFolder, 1) <> '\'
+		SET @FullBackupFolder = @FullBackupFolder + '\'
+
+	SET @CMD = N'RESTORE FILELISTONLY FROM  
+				DISK = N''' + @FullBackupFolder + @LastFullBackupName + N''''
+	
+	IF @CMD IS NOT NULL
+		SELECT @CMD
+
+	INSERT INTO #Files
+	EXEC(@CMD);
+
+	-- Get new file location
+
+	ALTER TABLE #Files
+	ADD NewPhysicalPath NVARCHAR(4000)
+
+	UPDATE #Files
+	SET NewPhysicalPath = 
+		CASE [type] WHEN 'D' THEN @DataNewLocation + REVERSE(SUBSTRING(REVERSE (PhysicalName),0,CHARINDEX('\',REVERSE (PhysicalName))))
+						WHEN 'L' THEN @LogNewLocation + REVERSE(SUBSTRING(REVERSE (PhysicalName),0,CHARINDEX('\',REVERSE (PhysicalName))))
+			END
+
+-- Move files script
+	SELECT @FilesRestore = @FilesRestore + 
+	' ,MOVE '''+ LogicalName +''' TO '''+ NewPhysicalPath + ''''
+	FROM #Files
+	
+	--select @FilesRestore
+
+--ELSE
+--	SELECT TOP 1 @LastFullBackupDate = backup_start_date , 
+--				@LastFullBackupLSN = last_lsn
+--	FROM msdb.dbo.backupset
+--	WHERE database_name = @OriginalDatabaseName
+--	ORDER BY backup_start_date DESC
+
+
+---------------------------------------------------------------------------
+------------------------ Restore Database
+---------------------------------------------------------------------------
+RAISERROR(' -------------- Restoring database: [%s] -------------- ',0,1,@RestoredDatabaseName) WITH NOWAIT;
+
+-- Add backslash at end of path if doesn't exist already
+IF RIGHT(@FullBackupFolder, 1) <> '\'
+	SET @FullBackupFolder = @FullBackupFolder + '\'
+
+-- Prepare and execute RESTORE Database command from full backup 	
+		SET @CMD = N'ALTER DATABASE ['+@RestoredDatabaseName+'] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;'
+		
+		SELECT @CMD;
+
+		IF @Debug = 0
+		BEGIN
+			EXEC(@CMD);
+		END
+
+	SET @CMD = N'RESTORE DATABASE ' + QUOTENAME(@RestoredDatabaseName) + N' FROM  
+				DISK = N''' + @FullBackupFolder + @LastFullBackupName + N''' WITH  
+				FILE = 1,  NORECOVERY,  NOUNLOAD,  STATS = 1 '
+
+	IF DB_ID(@RestoredDatabaseName) IS NOT NULL
+		SET @CMD = @CMD + N',REPLACE '
+
+	SET @CMD = @CMD + @FilesRestore
+
+	IF @LastFullBackupDate IS NULL
+		RAISERROR('No last full backup to restore',0,1) WITH NOWAIT;
+	ELSE
+		RAISERROR('Restore last database full backup: %s',0,1,@DateString) WITH NOWAIT;
+	
+	IF @CMD IS NOT NULL
+		SELECT @CMD
+
+	IF @Debug = 0
+	BEGIN
+		EXEC(@CMD);
+	END
+
+-- Perform final recovery if needed
+IF @PerformRecovery = 1 
+BEGIN
+	IF EXISTS
+		(SELECT '1' FROM sys.databases
+		WHERE name = @RestoredDatabaseName
+		AND state_desc <> 'RESTORING'
+		AND is_in_standby <> 1)
+
+	
+		RAISERROR ('Database [%s] is not in Restoring state. Can not restore database with recovery.',0,1,@RestoredDatabaseName) WITH NOWAIT;
+
+	ELSE
+	BEGIN
+
+	SET @CMD = N' RESTORE DATABASE ' + QUOTENAME(@RestoredDatabaseName) + N' WITH RECOVERY '
+	
+	RAISERROR('Restore database with recovery',0,1) WITH NOWAIT;
+	
+	IF @CMD IS NOT NULL
+		SELECT @CMD;
+
+	IF @Debug = 0
+	BEGIN
+		EXEC(@CMD);
+	END
+	
+	SET @CMD = N'ALTER DATABASE ['+@RestoredDatabaseName+'] SET MULTI_USER;'
+		
+	SELECT @CMD;
+ 
+    IF @Debug = 0
+    BEGIN
+        EXEC(@CMD);
+    END
+	END
+END
+
+-- Log action
+
+RAISERROR(N'Logging.',0,1) WITH NOWAIT;
+
+SELECT TOP 1 @LastFullBackupDate = backup_start_date 
+FROM msdb.dbo.backupset
+WHERE database_name = @RestoredDatabaseName
+AND type = 'D'
+ORDER BY backup_start_date DESC
+
+
+INSERT INTO master.dbo.tbl_Log_Restoring 
+(InsertDate, DatabaseName, LastFullBackup , LastLogBackup, ActionType ,WithRecovery)
+
+SELECT GETDATE(), @RestoredDatabaseName, @LastFullBackupDate, null , 'Full Only', @PerformRecovery
+							
+										
+RAISERROR(N'Done.',0,1) WITH NOWAIT;
+
+---------------------------------------------------------------------------
+------------------------ CLEANUP
+---------------------------------------------------------------------------
+
+IF OBJECT_ID ('tempdb..#Restore') IS NOT NULL
+	DROP TABLE #Restore
+IF OBJECT_ID ('tempdb..#Files') IS NOT NULL
+	DROP TABLE #Files
+IF OBJECT_ID ('tempdb..#Full') IS NOT NULL
+	DROP TABLE #Full
+IF OBJECT_ID ('tempdb..#Diff') IS NOT NULL
+	DROP TABLE #Diff
+IF OBJECT_ID ('tempdb..#Logs') IS NOT NULL
+	DROP TABLE #Logs
+IF OBJECT_ID('tempdb..#DirectoryChecks') IS NOT NULL
+		DROP TABLE #DirectoryChecks
+
+END

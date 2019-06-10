@@ -1,0 +1,96 @@
+
+
+	CREATE TRIGGER
+			[dbo].[AuditTrigger]
+	ON
+			[dbo].[Invitations]
+	AFTER
+			INSERT , UPDATE , DELETE
+	AS
+	
+	declare
+		@sql_operation as varchar(10)
+				
+    IF
+    EXISTS
+            (
+			SELECT
+				NULL
+            FROM
+                inserted
+			)
+            BEGIN
+
+                    IF
+                        EXISTS
+                                (
+								SELECT
+                                    NULL
+                                FROM
+                                    deleted
+                                )
+                    BEGIN
+
+                        SET @sql_operation = 'U';  -- UPDATE
+                    END
+                    ELSE   -- No rows in "deleted" table
+                    BEGIN
+
+                        SET @sql_operation = 'I';  -- INSERT
+                    END;
+            END
+			ELSE   -- No rows in "inserted" table
+            BEGIN
+                    SET @sql_operation = 'D';  -- DELETE
+            END;
+
+    INSERT INTO dbo.Auditing
+    (
+	DateTime, Action, TableName, Field, Value, Old_Value	
+	)
+
+	SELECT
+			DateTime			= SYSDATETIME() ,
+			Action				= @sql_operation ,
+			TableName			= 'Invitations',
+			Field				= FieldValues.FieldName ,
+			Value				= isnull (CAST (FieldValues.AfterValue AS VARCHAR(100)),''),
+			Old_Value			= isnull (CAST (FieldValues.BeforeValue AS VARCHAR(100)),'')
+	FROM
+		(
+			SELECT
+				[Id_Before] = deleted.[Id] ,
+				[Id_After] = inserted.[Id] ,
+				[RequestingSessionId_Before] = deleted.[RequestingSessionId] ,
+				[RequestingSessionId_After] = inserted.[RequestingSessionId] ,
+				[ReceivingMemberId_Before] = deleted.[ReceivingMemberId] ,
+				[ReceivingMemberId_After] = inserted.[ReceivingMemberId] ,
+				[CreationDateTime_Before] = deleted.[CreationDateTime] ,
+				[CreationDateTime_After] = inserted.[CreationDateTime] ,
+				[StatusId_Before] = deleted.[StatusId] ,
+				[StatusId_After] = inserted.[StatusId] ,
+				[ResponseDateTime_Before] = deleted.[ResponseDateTime] ,
+				[ResponseDateTime_After] = inserted.[ResponseDateTime] 
+			FROM
+				inserted
+			FULL OUTER JOIN
+				deleted
+			ON
+				inserted.[Id] = deleted.[Id]
+
+		)
+		AS
+			RawData
+	CROSS APPLY
+		(
+		VALUES
+			(N'Id' , CAST ([Id_Before] AS NVARCHAR(MAX)) , CAST ([Id_After] AS NVARCHAR(MAX))) ,
+			(N'RequestingSessionId' , CAST ([RequestingSessionId_Before] AS NVARCHAR(MAX)) , CAST ([RequestingSessionId_After] AS NVARCHAR(MAX))) ,
+			(N'ReceivingMemberId' , CAST ([ReceivingMemberId_Before] AS NVARCHAR(MAX)) , CAST ([ReceivingMemberId_After] AS NVARCHAR(MAX))) ,
+			(N'CreationDateTime' , CAST ([CreationDateTime_Before] AS NVARCHAR(MAX)) , CAST ([CreationDateTime_After] AS NVARCHAR(MAX))) ,
+			(N'StatusId' , CAST ([StatusId_Before] AS NVARCHAR(MAX)) , CAST ([StatusId_After] AS NVARCHAR(MAX))) ,
+			(N'ResponseDateTime' , CAST ([ResponseDateTime_Before] AS NVARCHAR(MAX)) , CAST ([ResponseDateTime_After] AS NVARCHAR(MAX))) 
+		)
+		AS
+			FieldValues (FieldName , BeforeValue , AfterValue);
+	

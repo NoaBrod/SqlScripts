@@ -1,0 +1,44 @@
+/****** Object:  Table [dbo].[Invitations]    Script Date: 8/9/2016 3:33:22 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Invitations](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[RequestingSessionId] [int] NOT NULL,
+	[ReceivingMemberId] [int] NOT NULL,
+	[CreationDateTime] [datetime2](0) NOT NULL,
+	[StatusId] [tinyint] NOT NULL,
+	[ResponseDateTime] [datetime2](0) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+
+GO
+SET IDENTITY_INSERT [dbo].[Invitations] ON 
+
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (169, 832759, 35017, CAST(N'2015-01-09 09:23:00.0000000' AS DateTime2), 2, CAST(N'2015-02-21 12:01:48.0000000' AS DateTime2))
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (431, 924724, 43209, CAST(N'2013-01-18 22:34:40.0000000' AS DateTime2), 1, NULL)
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (516, 380518, 76866, CAST(N'2014-10-30 04:52:19.0000000' AS DateTime2), 2, CAST(N'2015-11-30 12:19:20.0000000' AS DateTime2))
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (592, 416546, 85347, CAST(N'2015-12-21 10:34:32.0000000' AS DateTime2), 2, CAST(N'2016-04-25 19:09:42.0000000' AS DateTime2))
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (614, 960414, 50352, CAST(N'2012-11-01 14:25:26.0000000' AS DateTime2), 1, NULL)
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (686, 193229, 66413, CAST(N'2013-10-16 17:02:33.0000000' AS DateTime2), 1, NULL)
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (767, 970969, 28664, CAST(N'2014-12-31 03:17:28.0000000' AS DateTime2), 3, CAST(N'2016-02-13 05:50:49.0000000' AS DateTime2))
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (863, 535035, 49426, CAST(N'2013-07-20 09:20:53.0000000' AS DateTime2), 3, CAST(N'2016-06-29 21:12:17.0000000' AS DateTime2))
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (878, 164137, 66218, CAST(N'2016-06-22 12:17:06.0000000' AS DateTime2), 1, NULL)
+GO
+INSERT [dbo].[Invitations] ([Id], [RequestingSessionId], [ReceivingMemberId], [CreationDateTime], [StatusId], [ResponseDateTime]) VALUES (991, 112725, 15755, CAST(N'2011-06-25 18:20:43.0000000' AS DateTime2), 3, CAST(N'2014-05-05 04:47:16.0000000' AS DateTime2))
+GO
+SET IDENTITY_INSERT [dbo].[Invitations] OFF
+GO

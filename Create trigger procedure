@@ -1,0 +1,202 @@
+
+
+ /**
+For Tests:
+
+CREATE TABLE dbo.Audit
+(
+	DateTime				VARCHAR  (24) NOT NULL,
+	Action					VARCHAR  (36) NOT NULL,
+	TableName				VARCHAR  (21) NOT NULL,
+	Field					VARCHAR  (90) NOT NULL,
+	Value					VARCHAR  (90) NOT NULL,
+	Old_Value				VARCHAR  (90) NOT NULL
+) 
+
+ **/
+
+
+Alter PROCEDURE
+	dbo.CreateTrigger
+(
+	@SchemaName			AS SYSNAME ,
+	@TableName			AS SYSNAME ,
+	@TriggerName		AS SYSNAME 
+)
+AS
+
+DECLARE
+	@TriggerAction	AS NVARCHAR(20),
+	@Command		AS NVARCHAR(MAX),
+	@Command2		AS NVARCHAR(MAX),
+	@Command3		AS NVARCHAR(MAX)
+
+
+IF EXISTS (SELECT 
+				t.name, s.name 
+			FROM 
+				sys.tables AS t 
+			INNER JOIN 
+				sys.schemas AS s 
+			ON t.schema_id = s.schema_id 
+			INNER JOIN
+				sys.triggers AS tg
+			ON
+				tg.parent_id = t.object_id
+			WHERE 
+				object_name(tg.parent_id) = @TableName AND tg.name = @TriggerName
+			) 
+		SET @TriggerAction = 'ALTER'
+	ELSE
+		SET @TriggerAction = 'CREATE'
+
+
+SET @Command =
+	N'
+		'+@TriggerAction+' TRIGGER
+			   ' + QUOTENAME (@SchemaName) + N'.' + QUOTENAME (@TriggerName) + N'
+		ON
+			   ' + QUOTENAME (@SchemaName) + N'.' + QUOTENAME (@TableName) + N'
+		AFTER
+			   INSERT , UPDATE , DELETE
+		AS
+	
+		declare
+			@sql_operation as varchar(10)
+				
+       IF
+       EXISTS
+              (
+			   SELECT
+					NULL
+               FROM
+                    inserted
+			  )
+              BEGIN
+
+                     IF
+                           EXISTS
+                                  (
+									SELECT
+                                        NULL
+                                    FROM
+                                        deleted
+                                  )
+                     BEGIN
+
+                           SET @sql_operation = ''U'';  -- UPDATE
+                     END
+                     ELSE   -- No rows in "deleted" table
+                     BEGIN
+
+                           SET @sql_operation = ''I'';  -- INSERT
+                     END;
+              END
+       ELSE   -- No rows in "inserted" table
+              BEGIN
+                     SET @sql_operation = ''D'';  -- DELETE
+              END;
+
+        INSERT INTO dbo.Auditing
+              (
+				DateTime, Action, TableName, Field, Value, Old_Value	
+			  )
+		SELECT
+				DateTime			= SYSDATETIME() ,
+				Action				= @sql_operation ,
+				TableName			= ''' + @TableName + N''',
+				Field				= FieldValues.FieldName ,
+				Value				= isnull (CAST (FieldValues.AfterValue AS VARCHAR(100)),''''),
+				Old_Value			= isnull (CAST (FieldValues.BeforeValue AS VARCHAR(100)),'''')
+		FROM
+			(
+				SELECT';
+SELECT
+	@Command +=
+		N'[' + name + N'_Before] = deleted.' + QUOTENAME (name) + N' ,
+		[' + name + N'_After] = inserted.' + QUOTENAME (name) + N' ,
+		'
+FROM
+	sys.columns
+WHERE
+	object_id = OBJECT_ID (QUOTENAME (@SchemaName) + N'.' + QUOTENAME (@TableName))
+ORDER BY
+	column_id ASC;
+
+
+SET @Command = LEFT (@Command , LEN (@Command) - 5);
+
+SET @Command +=
+	N'
+				FROM
+					inserted
+				FULL OUTER JOIN
+					deleted
+				ON
+					';
+
+SELECT
+	@Command +=
+		N'inserted.' + QUOTENAME (Columns.name) + N' = deleted.' + QUOTENAME (Columns.name) + N'
+		AND
+			'
+FROM
+	sys.indexes AS Indexes
+INNER JOIN
+	sys.index_columns AS IndexColumns
+ON
+	Indexes.object_id = IndexColumns.object_id
+AND
+	Indexes.index_id = IndexColumns.index_id
+INNER JOIN
+	sys.columns AS Columns
+ON
+	Indexes.object_id = Columns.object_id
+AND
+	IndexColumns.column_id = Columns.column_id
+WHERE
+	Indexes.object_id = OBJECT_ID (QUOTENAME (@SchemaName) + N'.' + QUOTENAME (@TableName))
+AND
+	Indexes.is_primary_key = 1;
+					   
+SET @Command = LEFT (@Command , LEN (@Command) - 10);
+
+
+
+SET @Command2 =
+	N'
+			)
+			AS
+				RawData
+		CROSS APPLY
+			(
+				VALUES
+					';
+
+SELECT
+	@Command2 +=
+		N'(N''' + name + N''' , CAST ([' + name + N'_Before] AS NVARCHAR(MAX)) , CAST ([' + name + N'_After] AS NVARCHAR(MAX))) ,
+		'
+FROM
+	sys.columns
+WHERE
+	object_id = OBJECT_ID (QUOTENAME (@SchemaName) + N'.' + QUOTENAME (@TableName))
+ORDER BY
+	column_id ASC;
+
+SET @Command2 = LEFT (@Command2 , LEN (@Command2) - 5);
+
+
+SET @Command2 +=
+	N'
+			)
+			AS
+				FieldValues (FieldName , BeforeValue , AfterValue);
+	';
+
+
+-- PRINT( @Command + @Command2) -- uncomment for debug
+EXECUTE (@Command + @Command2)
+
+
+GO

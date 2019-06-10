@@ -1,0 +1,20 @@
+
+/****** Object:  Table [dbo].[Auditing]    Script Date: 8/9/2016 3:34:33 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_PADDING ON
+GO
+CREATE TABLE [dbo].[Auditing](
+	[DateTime] [varchar](24) NOT NULL,
+	[Action] [varchar](21) NOT NULL,
+	[TableName] [varchar](90) NOT NULL,
+	[Field] [varchar](90) NOT NULL,
+	[Value] [varchar](90) NOT NULL,
+	[Old_Value] [varchar](90) NOT NULL
+) ON [PRIMARY]
+
+GO
+SET ANSI_PADDING OFF
+GO
